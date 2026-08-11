@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Stap 1: Copilot Review starten
       # Afhankelijk van je Copilot setup (bijv. GitHub Copilot Workspace of Copilot CLI/Action)
@@ -28,7 +28,7 @@ jobs:
 
       # Stap 2: Labels bijwerken zodra de review is aangevraagd/voltooid
       - name: Update Labels
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const issue_number = context.issue.number;

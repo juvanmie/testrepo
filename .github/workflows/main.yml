@@ -1,0 +1,56 @@
+name: Copilot PR Review
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  copilot-review:
+    # Voer alleen uit als het specifieke label 'CoPilot Review' is toegevoegd
+    if: github.event.label.name == 'CoPilot Review'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Stap 1: Copilot Review starten
+      # Afhankelijk van je Copilot setup (bijv. GitHub Copilot Workspace of Copilot CLI/Action)
+      - name: Run Copilot Review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Vraag een Copilot review aan op de PR via de GitHub CLI
+          gh pr comment ${{ github.event.pull_request.number }} --body "@github-copilot review"
+
+      # Stap 2: Labels bijwerken zodra de review is aangevraagd/voltooid
+      - name: Update Labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // 1. Verwijder het 'CoPilot Review' label
+            try {
+              await github.rest.issues.removeLabel({
+                owner,
+                repo,
+                issue_number,
+                name: 'CoPilot Review'
+              });
+            } catch (e) {
+              core.warning('Label CoPilot Review kon niet worden verwijderd: ' + e.message);
+            }
+
+            // 2. Voeg het 'CoPilot Reviewed' label toe
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number,
+              labels: ['CoPilot Reviewed']
+            });

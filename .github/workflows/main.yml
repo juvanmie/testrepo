@@ -19,13 +19,17 @@ jobs:
 
       # Stap 1: Copilot Review starten
       # Afhankelijk van je Copilot setup (bijv. GitHub Copilot Workspace of Copilot CLI/Action)
-      - name: Run Copilot Review
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Vraag een Copilot review aan op de PR via de GitHub CLI
-          gh pr comment ${{ github.event.pull_request.number }} --body "@github-copilot review"
-
+      - name: Trigger Copilot Review
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            await github.rest.pulls.createReviewRequest({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              reviewers: ['github-copilot'] 
+            });
       # Stap 2: Labels bijwerken zodra de review is aangevraagd/voltooid
       - name: Update Labels
         uses: actions/github-script@v9

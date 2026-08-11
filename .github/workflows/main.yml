@@ -5,7 +5,8 @@ on:
     types: [labeled]
 
 jobs:
-  copilot-review:
+  # JOB 1: Triggers the Copilot Review
+  trigger-copilot-review:
     if: github.event.label.name == 'CoPilot Review'
     runs-on: ubuntu-latest
     permissions:
@@ -13,72 +14,85 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Run Copilot Review & Update Labels
+      - name: Request Copilot Review
         uses: actions/github-script@v9
-        with: 
-          # anders negeert Copilot het verzoek (bot filter)
+        with:
           github-token: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const pull_number = context.issue.number;
 
-            let reviewSuccessful = false;
-
             try {
-              // 1. Vraag de review aan via de correcte Octokit functie: requestReviewers
-              // Note: als Copilot als team of app werkt, gebruik eventueel team_reviewers of gh pr comment
+              // Primary method: Request reviewer via API
               await github.rest.pulls.requestReviewers({
                 owner,
                 repo,
                 pull_number,
-                reviewers: ['copilot'] // of de specifieke GitHub App slug
+                reviewers: ['copilot']
               });
-
-              reviewSuccessful = true;
-              console.log('Copilot review succesvol aangevraagd.');
+              console.log('Successfully requested Copilot review via API.');
             } catch (error) {
-              console.error('Fout bij aanvragen Copilot review:', error.message);
-              // Als requestReviewers faalt voor Copilot in jouw specifieke organisatie, 
-              // proberen we de fallback comment methode:
-              try {
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: pull_number,
-                  body: '@github-copilot review'
-                });
-                reviewSuccessful = true;
-              } catch (commentError) {
-                core.setFailed(`Review mislukt: ${commentError.message}`);
-              }
-            } finally {
-              // 2. DIT DEEL DRAAIT ALTIJD (OOK BIJ FOUTEN)
+              console.error('API request failed, attempting fallback comment method:', error.message);
               
-              // Verwijder ALTIJD het 'CoPilot Review' label
-              try {
-                await github.rest.issues.removeLabel({
-                  owner,
-                  repo,
-                  issue_number: pull_number,
-                  name: 'CoPilot Review'
-                });
-                console.log("Label 'CoPilot Review' verwijderd.");
-              } catch (e) {
-                console.warn("Kon 'CoPilot Review' label niet verwijderen (mogelijk al weg):", e.message);
-              }
+              // Fallback method: Post @github-copilot comment
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pull_number,
+                body: '@github-copilot review'
+              });
+              console.log('Successfully triggered Copilot review via comment fallback.');
+            }
 
-              // Voeg ALLEEN 'CoPilot Reviewed' toe ALS de review is gelukt
-              if (reviewSuccessful) {
-                await github.rest.issues.addLabels({
-                  owner,
-                  repo,
-                  issue_number: pull_number,
-                  labels: ['CoPilot Reviewed']
-                });
-                console.log("Label 'CoPilot Reviewed' toegevoegd.");
-              }
+  # JOB 2: Handles label management (Runs after Job 1)
+  manage-labels:
+    needs: trigger-copilot-review
+    # Ensures this job runs regardless of whether Job 1 succeeded, failed, or was cancelled
+    if: always() && github.event.label.name == 'CoPilot Review'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Update PR Labels
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.issue.number;
+            
+            // Check if Job 1 succeeded using the needs object
+            const reviewOutcome = '${{ needs.trigger-copilot-review.result }}';
+            console.log(`Review job status: ${reviewOutcome}`);
+
+            // 1. ALWAYS remove the trigger label
+            try {
+              await github.rest.issues.removeLabel({
+                owner,
+                repo,
+                issue_number,
+                name: 'CoPilot Review'
+              });
+              console.log("Label 'CoPilot Review' removed.");
+            } catch (error) {
+              console.warn("Could not remove 'CoPilot Review' label:", error.message);
+            }
+
+            // 2. Add 'CoPilot Reviewed' ONLY if the review job succeeded
+            if (reviewOutcome === 'success') {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number,
+                labels: ['CoPilot Reviewed']
+              });
+              console.log("Label 'CoPilot Reviewed' added.");
+            } else {
+              console.log("Skipped adding 'CoPilot Reviewed' label because review job did not succeed.");
             }

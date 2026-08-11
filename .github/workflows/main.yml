@@ -1,12 +1,12 @@
-name: Copilot PR Review
+name: Copilot PR Review Flow
 
 on:
   pull_request:
     types: [labeled]
 
 jobs:
-  # JOB 1: Triggers the Copilot Review
-  trigger-copilot-review:
+  copilot-review:
+    # Run only when the 'CoPilot Review' label is added
     if: github.event.label.name == 'CoPilot Review'
     runs-on: ubuntu-latest
     permissions:
@@ -17,7 +17,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Request Copilot Review
+      # STEP 1: Request the Copilot review
+      - name: Trigger Copilot Review
+        id: review
         uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
@@ -27,7 +29,7 @@ jobs:
             const pull_number = context.issue.number;
 
             try {
-              // Primary method: Request reviewer via API
+              // Try requesting reviewer via API
               await github.rest.pulls.requestReviewers({
                 owner,
                 repo,
@@ -36,8 +38,8 @@ jobs:
               });
               console.log('Successfully requested Copilot review via API.');
             } catch (error) {
-              console.error('API request failed, attempting fallback comment method:', error.message);
-              
+              console.error('API request failed, attempting comment fallback:', error.message);
+
               // Fallback method: Post @github-copilot comment
               await github.rest.issues.createComment({
                 owner,
@@ -48,35 +50,18 @@ jobs:
               console.log('Successfully triggered Copilot review via comment fallback.');
             }
 
-  # JOB 2: Handles label management (Runs after Job 1)
-  manage-labels:
-    needs: trigger-copilot-review
-    # Ensures this job runs regardless of whether Job 1 succeeded, failed, or was cancelled
-    if: always() && github.event.label.name == 'CoPilot Review'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-
-    steps:
-      - name: Update PR Labels
+      # STEP 2: ALWAYS remove the trigger label (runs regardless of Step 1 success/failure)
+      - name: Remove 'CoPilot Review' Label
+        if: always()
         uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issue_number = context.issue.number;
-            
-            // Check if Job 1 succeeded using the needs object
-            const reviewOutcome = '${{ needs.trigger-copilot-review.result }}';
-            console.log(`Review job status: ${reviewOutcome}`);
-
-            // 1. ALWAYS remove the trigger label
             try {
               await github.rest.issues.removeLabel({
-                owner,
-                repo,
-                issue_number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
                 name: 'CoPilot Review'
               });
               console.log("Label 'CoPilot Review' removed.");
@@ -84,15 +69,17 @@ jobs:
               console.warn("Could not remove 'CoPilot Review' label:", error.message);
             }
 
-            // 2. Add 'CoPilot Reviewed' ONLY if the review job succeeded
-            if (reviewOutcome === 'success') {
-              await github.rest.issues.addLabels({
-                owner,
-                repo,
-                issue_number,
-                labels: ['CoPilot Reviewed']
-              });
-              console.log("Label 'CoPilot Reviewed' added.");
-            } else {
-              console.log("Skipped adding 'CoPilot Reviewed' label because review job did not succeed.");
-            }
+      # STEP 3: Add the success label ONLY if Step 1 succeeded
+      - name: Add 'CoPilot Reviewed' Label
+        if: steps.review.outcome == 'success'
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['CoPilot Reviewed']
+            });
+            console.log("Label 'CoPilot Reviewed' added.");
